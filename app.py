@@ -321,6 +321,13 @@ homepage=[html.H1("Simulatore Elezioni Rosatellum  ",style={"color":"white","bac
     ,style={"color":"black","font-size":12})]
 
 
+homepage.append(dcc.Loading(
+            id="loading-1",
+            type="default",
+            children=html.Div(id="loading-output-1"),fullscreen=True))
+
+
+
 #homepage.append(html.H1("Scegli scenario di coalizione:",style={"font-size":12}))
 
 homepage.append(dcc.Dropdown(id='lista_coalizione',style={'width': '600px'},
@@ -395,6 +402,7 @@ output_array=[dash.dependencies.Output('grafico', 'figure'),dash.dependencies.Ou
 for party in parties:
     output_array.append(dash.dependencies.Output('slider-{0}'.format(party),'value'))
 
+output_array.append(dash.dependencies.Output("loading-output-1", "children"))
 ### input
 all_sliders=[dash.dependencies.Input('slider-{0}'.format(party), 'value') for party in parties]
 all_sliders.append(dash.dependencies.Input('lista_coalizione','value'))
@@ -507,7 +515,8 @@ def update_output(value1,value2,value3,value4,value5,value6,value7,value8,value9
 
     for party in parties:
         da_restituire.append(cp(party,1))
-
+    ## per il loader
+    da_restituire.append(None)
     return da_restituire
 
 
