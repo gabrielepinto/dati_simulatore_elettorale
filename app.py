@@ -373,13 +373,22 @@ homepage.append(dcc.Graph(id='grafico-senato',style={'width': '50%', 'display': 
 homepage.append(html.H4("I dati della  simulazione sono disponibili qui (https://github.com/gabrielepinto/dati_simulatore_elettorale), Ideato e sviluppato da Gabriele Pinto, gabriele_pintorm@hotmail.com, www.gabrielepinto.com",style={"color":"black","font-size":16}))
 
 
-homepage.append(html.H4("Camera: risultati collegi Uninominali"))
-homepage.append(dcc.Graph(id="mappa_camera"))
+homepage.append(html.H4(""))
+#homepage.append(dcc.Graph(id="grafico-barra-camera"))
+
+###
+#homepage.append(dash_table.DataTable(df.to_dict('records'), [{"name": i, "id": i} for i in df.columns]))
+homepage.append(html.H4(""))
+homepage.append(html.H4("Camera: risultati collegi uninominali"))
+homepage.append(dcc.Graph(id="mappa_camera",style={'width': '50%', 'display': 'inline-block'}))
+homepage.append(dcc.Graph(id="mappa_camera_margine",style={'width': '50%', 'display': 'inline-block'}))
 homepage.append(html.Div(id="tabella_camera"))
 
-homepage.append(html.H4("Senato: risultati collegi Uninominali"))
-homepage.append(dcc.Graph(id="mappa_senato"))
+homepage.append(html.H4("Senato: risultati collegi uninominali"))
+homepage.append(dcc.Graph(id="mappa_senato",style={'width': '50%', 'display': 'inline-block'}))
+homepage.append(dcc.Graph(id="mappa_senato_margine",style={'width': '50%', 'display': 'inline-block'}))
 homepage.append(html.Div(id="tabella_senato"))
+
 
 
 
@@ -398,7 +407,8 @@ output_array=[dash.dependencies.Output('grafico', 'figure'),dash.dependencies.Ou
     dash.dependencies.Output('grafico-senato', 'figure'),dash.dependencies.Output('grafico-gauge-senato', 'figure'),
     dash.dependencies.Output('grafico-barra-parlamento', 'figure'),
     dash.dependencies.Output("tabella_camera","children"),dash.dependencies.Output("tabella_senato","children"),
-    dash.dependencies.Output("mappa_camera","figure"),dash.dependencies.Output("mappa_senato","figure")]
+    dash.dependencies.Output("mappa_camera","figure"),dash.dependencies.Output("mappa_senato","figure"),
+    dash.dependencies.Output("mappa_camera_margine","figure"),dash.dependencies.Output("mappa_senato_margine","figure")]
 for party in parties:
     output_array.append(dash.dependencies.Output('slider-{0}'.format(party),'value'))
 
@@ -495,7 +505,7 @@ def update_output(value1,value2,value3,value4,value5,value6,value7,value8,value9
                             center={"lat": 41.902782, "lon": 12.496366},
                             color="VINCITORE",
                             mapbox_style="open-street-map",
-                            zoom=3)
+                            zoom=3,opacity=0.6)
     
     mappa_senato = px.choropleth_mapbox(geo_df_senato,
                             geojson=geo_df_senato.geometry,
@@ -503,7 +513,24 @@ def update_output(value1,value2,value3,value4,value5,value6,value7,value8,value9
                             center={"lat": 41.902782, "lon": 12.496366},
                             color="VINCITORE",
                             mapbox_style="open-street-map",
-                            zoom=3)
+                            zoom=3,opacity=0.6)
+
+    mappa_camera_margine = px.choropleth_mapbox(geo_df_camera,
+                            geojson=geo_df_camera.geometry,
+                            locations=geo_df_camera.index,
+                            center={"lat": 41.902782, "lon": 12.496366},
+                            color="MARGINE",
+                            mapbox_style="open-street-map",
+                            zoom=3,opacity=0.8)
+    
+    mappa_senato_margine = px.choropleth_mapbox(geo_df_senato,
+                            geojson=geo_df_senato.geometry,
+                            locations=geo_df_senato.index,
+                            center={"lat": 41.902782, "lon": 12.496366},
+                            color="VINCITORE",
+                            mapbox_style="open-street-map",
+                            zoom=3,opacity=0.8)
+
 
 
     
@@ -512,6 +539,8 @@ def update_output(value1,value2,value3,value4,value5,value6,value7,value8,value9
 
     da_restituire.append(mappa_camera)
     da_restituire.append(mappa_senato)
+    da_restituire.append(mappa_camera_margine)
+    da_restituire.append(mappa_senato_margine)
 
     for party in parties:
         da_restituire.append(cp(party,1))
