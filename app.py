@@ -89,24 +89,23 @@ def aumento_voti_partito(data,increase=0.25,
 
 
 
+
 def sporziona_hare(vot,seat):
     quota=vot.sum()/seat
     apportion=vot/quota
     apportion=apportion.astype("int")
     ### partiti ai quali aggiungere dei voti
     seggi_rimanenti=seat-sum(apportion) 
-    index_to_add=(-(vot-apportion*quota)).argsort()[:seggi_rimanenti]
+    resti=(vot/quota)-(vot/quota).apply(lambda x:int(x)).values
+    index_to_add=resti.sort_values(ascending=False).iloc[:seggi_rimanenti].index
     apportion[index_to_add]+=1
     return apportion
 
 
-
 def compute_uninom(camera,diz):
     '''
-    camera: sono i dati della camera in formato long
-    diz: dizionario della coalizione
+    camera sono i dati della camera in formato long
     '''
-    ### calcola i voti per ogni lista in ogni collegio
     uninom=camera.groupby(["COLLEGIOUNINOMINALE","LISTA"],as_index=False)["VOTI_LISTA"].sum()
     ## aggiungi coalizione
     uninom["COALIZIONE"]=uninom["LISTA"].replace(diz)
@@ -114,22 +113,18 @@ def compute_uninom(camera,diz):
     uninom=uninom.groupby(["COLLEGIOUNINOMINALE","COALIZIONE"],as_index=False)["VOTI_LISTA"].sum().pivot(index="COLLEGIOUNINOMINALE",columns="COALIZIONE",values="VOTI_LISTA").fillna(0)
 
 
-    ## partiti
+
     partiti=uninom.columns
-    #### prendi il primo partito/coalizione per ogni collegio
     seggi=uninom[partiti].apply(lambda x:(-x).argsort()[0],axis=1).value_counts()
-    ### assegna seggio
     uninom_camera=pd.DataFrame({"partiti":pd.Series(partiti).loc[seggi.index],"seggi":seggi.values})
 
-
     ### questo è per visualizzare breakdown da partito mentre uninom_camera è quello che li visualizza per coalizione
-    ### gli uninominali di coalizione vengono assegnati ad ogni partito in base alla loro percentuale all'interno della coalizione
     uninom_camera_per_partito=pd.DataFrame()
     for i,row in uninom_camera.iterrows():
         percentuali_within_list=camera.loc[camera["LISTA"].isin(row.partiti.split("*"))].groupby("LISTA",as_index=False)["VOTI_LISTA"].sum()
         ##
         perc_partiti=pd.merge(pd.DataFrame({"LISTA":row.partiti.split("*")}),percentuali_within_list).set_index("LISTA").transpose()
-        seggi=sporziona_hare(perc_partiti.values[0],row.seggi)
+        seggi=sporziona_hare(perc_partiti.iloc[0],row.seggi)
 
 
         uninom_camera_per_partito=uninom_camera_per_partito.append(pd.DataFrame({"partiti":perc_partiti.columns,"seggi":seggi}))
@@ -162,17 +157,45 @@ def compute_plurinom_camera(camera,seggi_plurinominale=245):
     partiti=[x for x in partiti if x not in partiti_non_superano_soglia]
 
 
-    seggi=sporziona_hare(plurinom[partiti].sum().values,
+    seggi=sporziona_hare(plurinom[partiti].sum(),
                   seggi_plurinominale)
-    plurinom_camera=pd.DataFrame({"partiti":partiti,"seggi":seggi})
+    plurinom_camera=pd.DataFrame({"partiti":partiti,"seggi":seggi.values})
     return(plurinom_camera.sort_values("seggi",ascending=False).reset_index(drop=True))
 
+
+def compute_plurinom_senato(camera):
+    plurinom=pd.DataFrame(camera.groupby("LISTA")["VOTI_LISTA"].sum()).transpose()
+    partiti=[x for x in plurinom.columns if x not in (["seggi","colleggio"])]
+    voti_totali= plurinom[partiti].sum().sum()
+    voti_partiti= plurinom[partiti].apply(lambda x:x.sum())
+    percentuali_partiti = voti_partiti/voti_totali
+    partiti_non_superano_soglia=percentuali_partiti.loc[percentuali_partiti<=0.03].index
+    ###SVP
+    controllo_plurinom=camera.groupby(["CODICE_REGIONE","LISTA"],as_index=False)["VOTI_LISTA"].sum()
+    controllo_plurinom["TOTALE_VOTI_REGIONE"]=controllo_plurinom.groupby("CODICE_REGIONE")["VOTI_LISTA"].transform("sum")
+    controllo_plurinom["PERC_REGIONE"]=controllo_plurinom["VOTI_LISTA"]/controllo_plurinom["TOTALE_VOTI_REGIONE"]
+    partiti_20_percento=controllo_plurinom.loc[controllo_plurinom["PERC_REGIONE"]>=0.2,"LISTA"].unique()
+    ### aggiungi quelli che non hanno il 3 per cento ma hanno il 20
+    partiti_non_superano_soglia=[x for x in partiti_non_superano_soglia if x not in  partiti_20_percento]
+
+    ## droppa
+    plurinom.drop(partiti_non_superano_soglia,axis=1,inplace=True)
+    partiti=[x for x in partiti if x not in partiti_non_superano_soglia]
+
+    plurinom_camera=pd.DataFrame()
+    for i,row in seggi_senato.iterrows():
+        plurinom_una_regione=pd.DataFrame(camera[camera["CODICE_REGIONE"]==row.CODICE_REGIONE].groupby("LISTA")["VOTI_LISTA"].sum()).transpose()    
+        seggi=sporziona_hare(plurinom_una_regione[partiti].sum(),
+                      row.seggi)
+        plurinom_camera=plurinom_camera.append(pd.DataFrame({"partiti":partiti,"seggi":seggi.values}))
+    plurinom_camera=plurinom_camera.groupby("partiti",as_index=False)["seggi"].sum()
+    return(plurinom_camera.sort_values("seggi",ascending=False).reset_index(drop=True))
 
     
 
 def cp(partito,mean=0):
     perc_attuale=camera.loc[camera["LISTA"]==partito,"VOTI_LISTA"].sum()/camera["VOTI_LISTA"].sum()
-    return np.round(perc_attuale*mean,6)
+    return np.round(perc_attuale*mean,4)
 
 def compute_gauge_data(result,diz):
     gauge_data=pd.DataFrame(result.groupby("partiti")["seggi"].sum()).reset_index(drop=False)
@@ -201,6 +224,7 @@ def create_fig_gauge(maggioranza,lista_gauge,maggioranza_richiesta=201,totale_po
             'threshold' : {'line': {'color': "red", 'width': 4}, 'thickness': 0.3, 'value': maggioranza_richiesta}}))
     return fig_gauge
 
+
 def compute_plurinom_senato(camera):
     plurinom=pd.DataFrame(camera.groupby("LISTA")["VOTI_LISTA"].sum()).transpose()
     partiti=[x for x in plurinom.columns if x not in (["seggi","colleggio"])]
@@ -219,16 +243,16 @@ def compute_plurinom_senato(camera):
     ## droppa
     plurinom.drop(partiti_non_superano_soglia,axis=1,inplace=True)
     partiti=[x for x in partiti if x not in partiti_non_superano_soglia]
-    ### assegna seggi per ogni regione...
+
     plurinom_camera=pd.DataFrame()
     for i,row in seggi_senato.iterrows():
         plurinom_una_regione=pd.DataFrame(camera[camera["CODICE_REGIONE"]==row.CODICE_REGIONE].groupby("LISTA")["VOTI_LISTA"].sum()).transpose()    
-        seggi=sporziona_hare(plurinom_una_regione[partiti].sum().values,
+        seggi=sporziona_hare(plurinom_una_regione[partiti].sum(),
                       row.seggi)
-        plurinom_camera=plurinom_camera.append(pd.DataFrame({"partiti":partiti,"seggi":seggi}))
+        plurinom_camera=plurinom_camera.append(pd.DataFrame({"partiti":partiti,"seggi":seggi.values}))
     plurinom_camera=plurinom_camera.groupby("partiti",as_index=False)["seggi"].sum()
     return(plurinom_camera.sort_values("seggi",ascending=False).reset_index(drop=True))
-    
+
 def tabella_uninom(camera,diz):
     uninom=camera.groupby(["COLLEGIOUNINOMINALE","LISTA"],as_index=False)["VOTI_LISTA"].sum()
     ## aggiungi coalizione
