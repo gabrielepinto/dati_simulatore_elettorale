@@ -249,6 +249,19 @@ senato=pd.read_csv(folder_head+"senato_bilanciato.csv",encoding="windows-1252",s
 seggi_senato=pd.read_excel(folder_head+"seggi_senato.xlsx")
 
 
+
+### update to latest estimate
+## for tuning
+
+stime=pd.read_excel(folder_head+"stime_partiti.xlsx",sheet_name="STIME")
+for z in range(0,20):    
+    for i,party in stime.iterrows():
+        aumento_voti_partito(camera,partito=party.party,increase=party.stima)
+## for tuning
+for z in range(0,20):    
+    for i,party in stime.iterrows():
+        aumento_voti_partito(senato,partito=party.party,increase=party.stima)
+
 geo_camera=gpd.read_file(folder_head+"COLLEGI_ELETTORALI_NUOVI/camera")
 geo_camera.rename({"COLLEGIOUN":"COLLEGIOUNINOMINALE"},axis=1,inplace=True)
 geo_camera.to_crs("EPSG:4326",inplace=True)
@@ -358,12 +371,23 @@ for x in range(0,5):
 
 
 
-for party in parties:
+
+
+first_col=[]
+second_col=[]
+for party in parties[0:6]:
     ## add title
-    homepage.append(html.H4("% {0}".format(party),style={"font-size":12,"color":diz_colori[party],"font-weight":"bold"}))
+    first_col.append(dbc.Row(html.H4("% {0}".format(party),style={"font-size":12,"color":diz_colori[party],"font-weight":"bold"})))
+    first_col.append(dbc.Row(html.Div(dcc.Slider(min=0.01,max=0.35,step=0.001,value=cp(party,mean=1),id='slider-{0}'.format(party),tooltip={"placement": "right", "always_visible": True}),style={"width":"400px"})))
     ### add slider
-    homepage.append(html.Div([dcc.Slider(min=0.000001,max=0.35,step=0.001,value=cp(party,mean=1),id='slider-{0}'.format(party),tooltip={"placement": "bottom", "always_visible": True})],style= {"marginRight":500}))
-## layout first
+for party in parties[6:]:
+    ## add title
+    second_col.append(dbc.Row(html.H4("% {0}".format(party),style={"font-size":12,"color":diz_colori[party],"font-weight":"bold"})))
+    second_col.append(dbc.Row(html.Div(dcc.Slider(min=0.01,max=0.35,step=0.001,value=cp(party,mean=1),id='slider-{0}'.format(party),tooltip={"placement": "right", "always_visible": True}),style={"width":"400px"})))
+    ### add slider
+    #",
+homepage.append(html.Div(dbc.Row([dbc.Col(first_col),dbc.Col(second_col)]),style={"marginLeft":'15%',"marginRight":'15%'}))
+
 
 
 homepage.append(dcc.Graph(id='grafico',style={'width': '50%', 'display': 'inline-block'}))
@@ -379,14 +403,18 @@ homepage.append(html.H4(""))
 ###
 #homepage.append(dash_table.DataTable(df.to_dict('records'), [{"name": i, "id": i} for i in df.columns]))
 homepage.append(html.H4(""))
-homepage.append(html.H4("Camera: risultati collegi uninominali"))
+homepage.append(html.H4("Camera: mappe risultati collegi uninominali"))
 homepage.append(dcc.Graph(id="mappa_camera",style={'width': '50%', 'display': 'inline-block'}))
 homepage.append(dcc.Graph(id="mappa_camera_margine",style={'width': '50%', 'display': 'inline-block'}))
-homepage.append(html.Div(id="tabella_camera"))
 
-homepage.append(html.H4("Senato: risultati collegi uninominali"))
+homepage.append(html.H4(""))
+homepage.append(html.H4("Senato: mappe risultati collegi uninominali"))
 homepage.append(dcc.Graph(id="mappa_senato",style={'width': '50%', 'display': 'inline-block'}))
 homepage.append(dcc.Graph(id="mappa_senato_margine",style={'width': '50%', 'display': 'inline-block'}))
+
+homepage.append(html.H4("Camera: dettaglio risultati collegi uninominali"))
+homepage.append(html.Div(id="tabella_camera"))
+homepage.append(html.H4("Senato: dettaglio risultati collegi uninominali"))
 homepage.append(html.Div(id="tabella_senato"))
 
 
@@ -527,7 +555,7 @@ def update_output(value1,value2,value3,value4,value5,value6,value7,value8,value9
                             geojson=geo_df_senato.geometry,
                             locations=geo_df_senato.index,
                             center={"lat": 41.902782, "lon": 12.496366},
-                            color="VINCITORE",
+                            color="MARGINE",
                             mapbox_style="open-street-map",
                             zoom=3,opacity=0.8)
 
