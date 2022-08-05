@@ -38,8 +38,6 @@ folder_head="dati_app/"
 
 
 
-
-
 def aumento_voti_territorio(data,increase=0.35,
                             partito="LEGA",
                             unit_name="COLLEGIOUNINOMINALE",
@@ -52,11 +50,11 @@ def aumento_voti_territorio(data,increase=0.35,
     unit = nome del colleggio o area
     '''
     ## calcolo percentuale
-    perc_attuale=data.loc[(data["LISTA"]==partito)&(data[unit_name]==unit),"VOTI_LISTA"].sum()/data.loc[(data[unit_name]==unit),"VOTI_LISTA"].sum()
-
+    perc_attuale=data.loc[(data["LISTA"]==partito)&(data[unit_name]==unit),"VOTI_LISTA"].sum()/data.loc[(data[unit_name]==unit),"VOTANTI"].unique()[0]
     ### individua l'/le unità da modificare
-    unit_to_edit=data.loc[(data["LISTA"]==partito)&(data[unit_name]==unit),"VOTI_LISTA"]
-    nuovo_valore=data.loc[unit_to_edit.index,"VOTI_LISTA"]=unit_to_edit*(increase/perc_attuale)
+    unit_to_edit=data.loc[(data["LISTA"]==partito)&(data[unit_name]==unit),"VOTI_LISTA"].copy()
+    data.loc[unit_to_edit.index,"VOTI_LISTA"]=unit_to_edit*(increase/perc_attuale)
+    nuovo_valore=data.loc[unit_to_edit.index,"VOTI_LISTA"]
     diff_da_riallocare=nuovo_valore-unit_to_edit
     # ### individua quelle da aggiustare
     units_to_adjust=data.loc[(~data.index.isin(unit_to_edit.index))&(data["LISTA"]==partito)].index
