@@ -28,7 +28,9 @@ from dash.exceptions import PreventUpdate
 
 #instantiate Dash
 external_stylesheets =[dbc.themes.UNITED]
-app = dash.Dash(__name__,external_stylesheets=external_stylesheets)
+app = dash.Dash(__name__, external_stylesheets=external_stylesheets,meta_tags=[
+        {"name": "viewport", "content": "width=device-width, initial-scale=1"}
+    ])
 app.title="simulatorelezioni"
 server = app.server
 
@@ -132,72 +134,102 @@ def compute_uninom(camera,diz):
     
 
 
-def compute_plurinom_camera(camera,seggi_plurinominale=245):
-    
-    plurinom=pd.DataFrame(camera.groupby("LISTA")["VOTI_LISTA"].sum()).transpose()
-    partiti=[x for x in plurinom.columns if x not in (["seggi","colleggio"])]
+def compute_plurinom_camera(camera,diz,seggi_plurinominale=245):
+    ### soglia 3%
+    perc_partiti=camera.groupby("LISTA")["VOTI_LISTA"].sum()/camera["VOTI_LISTA"].sum()
+    p1=list(perc_partiti.loc[perc_partiti>=0.03].index)
 
-    voti_totali= plurinom[partiti].sum().sum()
-    voti_partiti= plurinom[partiti].apply(lambda x:x.sum())
-    percentuali_partiti = voti_partiti/voti_totali
-    partiti_non_superano_soglia=percentuali_partiti.loc[percentuali_partiti<=0.03].index
-    ###SVP
-    controllo_plurinom=camera.groupby(["CIRCOSCRIZIONE","LISTA"],as_index=False)["VOTI_LISTA"].sum()
-    controllo_plurinom["TOTALE_VOTI_CIRCOSCRIZIONE"]=controllo_plurinom.groupby("CIRCOSCRIZIONE")["VOTI_LISTA"].transform("sum")
-    controllo_plurinom["PERC_CIRCOSCRIZIONE"]=controllo_plurinom["VOTI_LISTA"]/controllo_plurinom["TOTALE_VOTI_CIRCOSCRIZIONE"]
-    partiti_20_percento=controllo_plurinom.loc[controllo_plurinom["PERC_CIRCOSCRIZIONE"]>=0.2,"LISTA"].unique()
-    ### aggiungi quelli che non hanno il 3 per cento ma hanno il 20
-    partiti_non_superano_soglia=[x for x in partiti_non_superano_soglia if x not in  partiti_20_percento]
+    ### soglia 1% partiti in coalizione
+    coalizioni=[x for x in np.unique(list(diz.values())) if "*" in x]
+    partito_in_coalizioni=[partito for partito in camera.LISTA.unique() if any(partito in coalizione for coalizione in coalizioni)]
+    p2=list(perc_partiti.loc[perc_partiti.index.isin(partito_in_coalizioni)&(perc_partiti>=0.01),].index)
 
-    ## droppa
+    ### soglia 20 % circoscrizione per SVP
 
-    plurinom.drop(partiti_non_superano_soglia,axis=1,inplace=True)
-    partiti=[x for x in partiti if x not in partiti_non_superano_soglia]
+    circoscrizione=camera.loc[camera["LISTA"]=="SVP"].groupby(["LISTA","CIRCOSCRIZIONE"],as_index=False)["VOTI_LISTA"].sum()
+
+    circoscrizione=pd.merge(circoscrizione,
+            camera.groupby("CIRCOSCRIZIONE",as_index=False)["VOTI_LISTA"].sum().rename({"VOTI_LISTA":"VOTI_TOTALE"},axis=1),on="CIRCOSCRIZIONE",how="left")
+    p3=list(circoscrizione.loc[(circoscrizione["VOTI_LISTA"]/circoscrizione["VOTI_TOTALE"])>0.2,"LISTA"].unique())
+
+    ### seleziona partiti ammessi
+    partiti_ammessi=list(set(p1).union(set(p2)).union(set(p3)))
+    cam=camera.loc[camera.LISTA.isin(partiti_ammessi)].copy()
 
 
-    seggi=sporziona_hare(plurinom[partiti].sum(),
+    ## ripartizione coalizioni
+    seggi_coalizione=sporziona_hare(cam.replace(diz).groupby("LISTA")["VOTI_LISTA"].sum(),
                   seggi_plurinominale)
-    plurinom_camera=pd.DataFrame({"partiti":partiti,"seggi":seggi.values})
-    return(plurinom_camera.sort_values("seggi",ascending=False).reset_index(drop=True))
+    seggi_coalizione=pd.DataFrame({"seggi":seggi_coalizione.values,"partiti":seggi_coalizione.index})
+
+    plurinom_camera=pd.DataFrame()
+    ### ripartizione liste
+    for i,row in seggi_coalizione.iterrows():
+        # lista partiti nella coalizione
+        parties_coalizione=row.partiti.split("*")
+        # rialloca all'interno della coalizione
+        seggi_una_coalizione=sporziona_hare(camera.groupby("LISTA")["VOTI_LISTA"].sum().loc[parties_coalizione],
+                      row.seggi)
+
+        plurinom_camera=plurinom_camera.append(pd.DataFrame({"seggi":seggi_una_coalizione.values,"partiti":seggi_una_coalizione.index}))
+
+    plurinom_camera=plurinom_camera.groupby("partiti",as_index=False)["seggi"].sum()
+
+    return plurinom_camera.sort_values("seggi",ascending=False).reset_index(drop=True)
 
 
-def compute_plurinom_senato(camera,by_region=0):
-    plurinom=pd.DataFrame(camera.groupby("LISTA")["VOTI_LISTA"].sum()).transpose()
-    partiti=[x for x in plurinom.columns if x not in (["seggi","colleggio"])]
-    voti_totali= plurinom[partiti].sum().sum()
-    voti_partiti= plurinom[partiti].apply(lambda x:x.sum())
-    percentuali_partiti = voti_partiti/voti_totali
-    partiti_non_superano_soglia=percentuali_partiti.loc[percentuali_partiti<=0.03].index
-    ###SVP
-    controllo_plurinom=camera.groupby(["CODICE_REGIONE","LISTA"],as_index=False)["VOTI_LISTA"].sum()
-    controllo_plurinom["TOTALE_VOTI_REGIONE"]=controllo_plurinom.groupby("CODICE_REGIONE")["VOTI_LISTA"].transform("sum")
-    controllo_plurinom["PERC_REGIONE"]=controllo_plurinom["VOTI_LISTA"]/controllo_plurinom["TOTALE_VOTI_REGIONE"]
-    partiti_20_percento=controllo_plurinom.loc[controllo_plurinom["PERC_REGIONE"]>=0.2,"LISTA"].unique()
-    ### aggiungi quelli che non hanno il 3 per cento ma hanno il 20
-    partiti_non_superano_soglia=[x for x in partiti_non_superano_soglia if x not in  partiti_20_percento]
-
-    ## droppa
-    plurinom.drop(partiti_non_superano_soglia,axis=1,inplace=True)
-    partiti=[x for x in partiti if x not in partiti_non_superano_soglia]
+def compute_plurinom_senato(camera,diz,by_region=0):
     
-    if by_region==0:
-        plurinom_camera=pd.DataFrame()
-        for i,row in seggi_senato.iterrows():
-            plurinom_una_regione=pd.DataFrame(camera[camera["CODICE_REGIONE"]==row.CODICE_REGIONE].groupby("LISTA")["VOTI_LISTA"].sum()).transpose()    
-            seggi=sporziona_hare(plurinom_una_regione[partiti].sum(),
-                          row.seggi)
-            plurinom_camera=plurinom_camera.append(pd.DataFrame({"partiti":partiti,"seggi":seggi.values}))
-        plurinom_camera=plurinom_camera.groupby("partiti",as_index=False)["seggi"].sum()
-        plurinom_camera=plurinom_camera.sort_values("seggi",ascending=False).reset_index(drop=True)
-    
+    ### soglia 3%
+    perc_partiti=camera.groupby("LISTA")["VOTI_LISTA"].sum()/camera["VOTI_LISTA"].sum()
+    p1=list(perc_partiti.loc[perc_partiti>=0.03].index)
+
+    ### soglia 1% partiti in coalizione
+    coalizioni=[x for x in np.unique(list(diz.values())) if "*" in x]
+    partito_in_coalizioni=[partito for partito in camera.LISTA.unique() if any(partito in coalizione for coalizione in coalizioni)]
+    p2=list(perc_partiti.loc[perc_partiti.index.isin(partito_in_coalizioni)&(perc_partiti>=0.01),].index)
+
+    ### soglia 20 % regione
+
+    circoscrizione=camera.groupby(["LISTA","CODICE_REGIONE"],as_index=False)["VOTI_LISTA"].sum()
+
+    circoscrizione=pd.merge(circoscrizione,
+            camera.groupby("CODICE_REGIONE",as_index=False)["VOTI_LISTA"].sum().rename({"VOTI_LISTA":"VOTI_TOTALE"},axis=1),on="CODICE_REGIONE",how="left")
+    p3=list(circoscrizione.loc[(circoscrizione["VOTI_LISTA"]/circoscrizione["VOTI_TOTALE"])>0.2,"LISTA"].unique())
+
+    ### seleziona partiti ammessi
+    partiti_ammessi=list(set(p1).union(set(p2)).union(set(p3)))
+    cam=camera.loc[camera.LISTA.isin(partiti_ammessi)].copy()
+
+
+    ## per ogni regione
+    plurinom_camera=pd.DataFrame()
+    for i,region in seggi_senato.iterrows():
+
+        ## ripartizione coalizioni
+        cam_regione=cam.loc[cam["CODICE_REGIONE"]==region.CODICE_REGIONE]
+
+        seggi_coalizione=sporziona_hare(cam_regione.replace(diz).groupby("LISTA")["VOTI_LISTA"].sum(),
+                      region.seggi)
+        seggi_coalizione=pd.DataFrame({"seggi":seggi_coalizione.values,"partiti":seggi_coalizione.index,"CODICE_REGIONE":region.CODICE_REGIONE})
+
+
+        ### ripartizione liste
+        for i,row in seggi_coalizione.iterrows():
+            # lista partiti nella coalizione
+            parties_coalizione=row.partiti.split("*")
+            # rialloca all'interno della coalizione
+            if row.seggi!=0:            
+                seggi_una_coalizione=sporziona_hare(cam_regione.groupby("LISTA")["VOTI_LISTA"].sum().loc[parties_coalizione],
+                              row.seggi)
+                plurinom_camera=plurinom_camera.append(pd.DataFrame({"seggi":seggi_una_coalizione.values,"partiti":seggi_una_coalizione.index,"COD_REGIONE":row.CODICE_REGIONE}))
+
+    if by_region!=0:
+        plurinom_camera=plurinom_camera.groupby(["partiti","COD_REGIONE"],as_index=False)["seggi"].sum()
     else:
-        ### riporta i risultati con dettaglio regionale
-        plurinom_camera=pd.DataFrame()
-        for i,row in seggi_senato.iterrows():
-            plurinom_una_regione=pd.DataFrame(camera[camera["CODICE_REGIONE"]==row.CODICE_REGIONE].groupby("LISTA")["VOTI_LISTA"].sum()).transpose()    
-            seggi=sporziona_hare(plurinom_una_regione[partiti].sum(),
-                          row.seggi)
-            plurinom_camera=plurinom_camera.append(pd.DataFrame({"partiti":partiti,"seggi":seggi.values,"COD_REGIONE":row.CODICE_REGIONE}))
+        plurinom_camera=plurinom_camera.groupby(["partiti"],as_index=False)["seggi"].sum()
+    plurinom_camera=plurinom_camera.sort_values("seggi",ascending=False).reset_index(drop=True)
+    
     return plurinom_camera
     
 
@@ -229,7 +261,7 @@ def create_fig_gauge(maggioranza,lista_gauge,maggioranza_richiesta=201,totale_po
         'axis': {'range': [None, totale_posti]},
             'steps' : lista_gauge,
             ### questo + il valore della barragrigia
-            'threshold' : {'line': {'color': "red", 'width': 4}, 'thickness': 0.3, 'value': maggioranza_richiesta}}))
+            'threshold' : {'line': {'color': "red", 'width': 3}, 'thickness': 0.3, 'value': maggioranza_richiesta}}))
     return fig_gauge
 
 
@@ -253,7 +285,7 @@ def scenario_base(camera):
 def allocazione_plurinom_camera(camera):
     all_results_camera=pd.merge(camera,camera_match,on="COLLEGIOUNINOMINALE")
     seggi_plurinom=all_results_camera.groupby(["COLLEGIOPLURINOMINALE","LISTA"],as_index=False)["VOTI_LISTA"].sum().pivot(index="COLLEGIOPLURINOMINALE",columns="LISTA",values="VOTI_LISTA")
-    seggi_spettanti=compute_plurinom_camera(camera)
+    seggi_spettanti=compute_plurinom_camera(camera,diz=diz_coalizione)
 
     #row=seggi_spettanti.iloc[0,:]
     seggi_partito=[]
@@ -266,7 +298,7 @@ def allocazione_plurinom_senato(senato):
 
     all_results_senato=pd.merge(senato,senato_match,on="COLLEGIOUNINOMINALE")
     seggi_plurinom=all_results_senato.groupby(["COLLEGIOPLURINOMINALE","LISTA"],as_index=False)["VOTI_LISTA"].sum().pivot(index=["COLLEGIOPLURINOMINALE"],columns="LISTA",values="VOTI_LISTA")
-    seggi_spettanti=compute_plurinom_senato(senato,by_region=1)
+    seggi_spettanti=compute_plurinom_senato(senato,diz=diz_coalizione,by_region=1)
     ### elimina quelli con zero seggi
     seggi_spettanti=seggi_spettanti.loc[seggi_spettanti.seggi!=0]
 
@@ -337,7 +369,7 @@ diz_order=dict(zip(df_color["LISTA"],df_color["left-right"]))
 #fig=px.bar(result,x="partiti",y="seggi",color="partiti",width=1500, height=600)
 result=compute_uninom(camera=camera,diz=diz_coalizione)
 result["Seggio"]="uninominale"
-result2=compute_plurinom_camera(camera=camera)
+result2=compute_plurinom_camera(camera=camera,diz=diz_coalizione)
 result2["Seggio"]="plurinominale"
 result=result.append(result2)
 result=result.append(pd.DataFrame({"seggi":[8],"Seggio":"plurinominale","partiti":"ESTERO"}))
@@ -346,15 +378,15 @@ result.sort_values(["seggi","Seggio"],ascending=False,inplace=True)
 ### calcola risultati per il  senato
 result_senato=compute_uninom(camera=senato,diz=diz_coalizione)
 result_senato["Seggio"]="uninominale"
-result2_senato=compute_plurinom_senato(camera=senato)
+result2_senato=compute_plurinom_senato(camera=senato,diz=diz_coalizione)
 result2_senato["Seggio"]="plurinominale"
 result_senato=result_senato.append(result2_senato)
 result_senato=result_senato.append(pd.DataFrame({"seggi":[4],"Seggio":"plurinominale","partiti":"ESTERO"}))
 result_senato.sort_values(["seggi","Seggio"],ascending=False,inplace=True)
 
 ### vedi figura
-fig=px.bar(result,title="camera",x="partiti",y="seggi",color="partiti",color_discrete_map=diz_colori,facet_col="Seggio",width=700, height=500)
-fig_senato=px.bar(result_senato,title="senato",x="partiti",y="seggi",color="partiti",color_discrete_map=diz_colori,facet_col="Seggio",width=700, height=500)
+fig=px.bar(result,title="camera",x="partiti",y="seggi",color="partiti",color_discrete_map=diz_colori,facet_col="Seggio")
+fig_senato=px.bar(result_senato,title="senato",x="partiti",y="seggi",color="partiti",color_discrete_map=diz_colori,facet_col="Seggio")
 ### GAUGE
 gauge_data,lista_gauge=compute_gauge_data(result=result,diz=diz_coalizione)
 maggioranza=gauge_data.groupby("coalizione")["seggi"].sum().loc["FDI*LEGA*FI"]
@@ -391,7 +423,7 @@ homepage.append(dcc.Loading(
 
 #homepage.append(html.H1("Scegli scenario di coalizione:",style={"font-size":12}))
 
-homepage.append(dcc.Dropdown(id='lista_coalizione',style={'width': '600px'},
+homepage.append(dcc.Dropdown(id='lista_coalizione',
 multi=False,options=[{"label":y,"value":x} for x,y in zip(lista_coalizione,descrizione_coalizione)],value=lista_coalizione[0]))
 
 
@@ -409,13 +441,13 @@ homepage.append(html.H4("La barra grigia rappresenta maggioranza di CDX, il nume
 
 
 
-homepage.append(dcc.Graph(id='grafico-gauge',style={'width': '25%', 'display': 'inline-block'}))
-homepage.append(dcc.Graph(id='grafico-gauge-senato',style={'width': '25%', 'display': 'inline-block'}))
-homepage.append(dcc.Graph(id='grafico-barra-parlamento',style={'width': '50%', 'display': 'inline-block'}))
+homepage.append(dcc.Graph(id='grafico-gauge',style={'display': 'inline-block',"width":"100%"}))
+homepage.append(dcc.Graph(id='grafico-gauge-senato',style={'display': 'inline-block',"width":"100%"}))
+homepage.append(dcc.Graph(id='grafico-barra-parlamento',style={"width":"80%"}))
 
 
-for x in range(0,5):
-    homepage.append(html.H1(""))
+# for x in range(0,5):
+#     homepage.append(html.H1(""))
 
 
 
@@ -426,26 +458,28 @@ second_col=[]
 for party in parties[0:6]:
     ## add title
     first_col.append(dbc.Row(html.H4("% {0}".format(party),style={"font-size":12,"color":diz_colori[party],"font-weight":"bold"})))
-    first_col.append(dbc.Row(html.Div(dcc.Slider(min=0.01,max=0.35,step=0.001,value=cp(party,mean=1),id='slider-{0}'.format(party),tooltip={"placement": "right", "always_visible": True}),style={"width":"400px"})))
+    first_col.append(dbc.Row(html.Div(dcc.Slider(min=0.01,max=0.35,step=0.001,value=cp(party,mean=1),id='slider-{0}'.format(party),tooltip={"placement": "right", "always_visible": True}),style={"width":"50%"})))
+
     ### add slider
 for party in parties[6:]:
     ## add title
     second_col.append(dbc.Row(html.H4("% {0}".format(party),style={"font-size":12,"color":diz_colori[party],"font-weight":"bold"})))
-    second_col.append(dbc.Row(html.Div(dcc.Slider(min=0.01,max=0.35,step=0.001,value=cp(party,mean=1),id='slider-{0}'.format(party),tooltip={"placement": "right", "always_visible": True}),style={"width":"400px"})))
+    second_col.append(dbc.Row(html.Div(dcc.Slider(min=0.01,max=0.35,step=0.001,value=cp(party,mean=1),id='slider-{0}'.format(party),tooltip={"placement": "right", "always_visible": True}),style={"width":"50%"})))
+
     ### add slider
     #",
 homepage.append(html.Div(dbc.Row([dbc.Col(first_col),dbc.Col(second_col)]),style={"marginLeft":'15%',"marginRight":'15%'}))
-
+#homepage.append(html.Div(dbc.Row([dbc.Col(first_col),dbc.Col(second_col)]),style={"marginLeft":'15%',"marginRight":'15%'}))
 
 homepage.append(html.H4(""))
 homepage.append(html.H4(""))
 fonte_dati=dr=pd.read_excel(folder_head+"stime_partiti.xlsx",sheet_name="STIME")["fonte"].iloc[0]
-homepage.append(html.H4("Fonte per le % dei partiti nazionali nello scenario di base:  {0}".format(fonte_dati),style={"marginLeft":"30%","font-size":12}))
+homepage.append(html.H4("Fonte per le % dei partiti nazionali nello scenario di base:  {0}".format(fonte_dati),style={"font-size":12}))
 
 
 
-homepage.append(dcc.Graph(id='grafico',style={'width': '50%', 'display': 'inline-block'}))
-homepage.append(dcc.Graph(id='grafico-senato',style={'width': '50%', 'display': 'inline-block',}))
+homepage.append(dcc.Graph(id='grafico',style={ 'display': 'inline-block'}))
+homepage.append(dcc.Graph(id='grafico-senato',style={'display': 'inline-block',}))
 
 
 
@@ -457,13 +491,13 @@ homepage.append(html.H4(""))
 #homepage.append(dash_table.DataTable(df.to_dict('records'), [{"name": i, "id": i} for i in df.columns]))
 homepage.append(html.H4(""))
 homepage.append(html.H4("Camera: mappe risultati collegi uninominali"))
-homepage.append(dcc.Graph(id="mappa_camera",style={'width': '50%', 'display': 'inline-block'}))
-homepage.append(dcc.Graph(id="mappa_camera_margine",style={'width': '50%', 'display': 'inline-block'}))
+homepage.append(dcc.Graph(id="mappa_camera",style={ 'display': 'inline-block'}))
+homepage.append(dcc.Graph(id="mappa_camera_margine",style={'display': 'inline-block'}))
 
 homepage.append(html.H4(""))
 homepage.append(html.H4("Senato: mappe risultati collegi uninominali"))
-homepage.append(dcc.Graph(id="mappa_senato",style={'width': '50%', 'display': 'inline-block'}))
-homepage.append(dcc.Graph(id="mappa_senato_margine",style={'width': '50%', 'display': 'inline-block'}))
+homepage.append(dcc.Graph(id="mappa_senato",style={'display': 'inline-block'}))
+homepage.append(dcc.Graph(id="mappa_senato_margine",style={'display': 'inline-block'}))
 
 
 homepage.append(html.H4("I dati della  simulazione sono disponibili qui (https://github.com/gabrielepinto/dati_simulatore_elettorale), Ideato e sviluppato da Gabriele Pinto, gabriele_pintorm@hotmail.com, www.gabrielepinto.com",style={"color":"black","font-size":16}))
@@ -537,7 +571,7 @@ def update_output(value1,value2,value3,value4,value5,value6,value7,value8,value9
     ### calcola risultati per la camera
     result=compute_uninom(camera=camera,diz=diz_coalizione)
     result["Seggio"]="uninominale"
-    result2=compute_plurinom_camera(camera=camera)
+    result2=compute_plurinom_camera(camera=camera,diz=diz_coalizione)
     result2["Seggio"]="plurinominale"
     result=result.append(result2)
     result=result.append(pd.DataFrame({"seggi":[8],"Seggio":"plurinominale","partiti":"ESTERO"}))
@@ -546,15 +580,15 @@ def update_output(value1,value2,value3,value4,value5,value6,value7,value8,value9
     ### calcola risultati per il  senato
     result_senato=compute_uninom(camera=senato,diz=diz_coalizione)
     result_senato["Seggio"]="uninominale"
-    result2_senato=compute_plurinom_senato(camera=senato)
+    result2_senato=compute_plurinom_senato(camera=senato,diz=diz_coalizione)
     result2_senato["Seggio"]="plurinominale"
     result_senato=result_senato.append(result2_senato)
     result_senato=result_senato.append(pd.DataFrame({"seggi":[4],"Seggio":"plurinominale","partiti":"ESTERO"}))
     result_senato.sort_values(["seggi","Seggio"],ascending=False,inplace=True)
 
     ### vedi figura
-    fig=px.bar(result,title="camera",x="partiti",y="seggi",color="partiti",color_discrete_map=diz_colori,facet_col="Seggio",width=700, height=500)
-    fig_senato=px.bar(result_senato,title="Senato",x="partiti",y="seggi",color="partiti",color_discrete_map=diz_colori,facet_col="Seggio",width=700, height=500)
+    fig=px.bar(result,title="camera",x="partiti",y="seggi",color="partiti",color_discrete_map=diz_colori,facet_col="Seggio")
+    fig_senato=px.bar(result_senato,title="Senato",x="partiti",y="seggi",color="partiti",color_discrete_map=diz_colori,facet_col="Seggio")
     ### GAUGE
     gauge_data,lista_gauge=compute_gauge_data(result=result,diz=diz_coalizione)
     maggioranza=gauge_data.groupby("coalizione")["seggi"].sum().loc["FDI*LEGA*FI"]
@@ -668,7 +702,7 @@ def download_excel():
 
     ### camera e senato plurinominale
     rip_camera_plurinom=allocazione_plurinom_camera(camera=camera).to_excel(excel_writer, sheet_name="RIP_CAMERA_PLURINOMINALE")
-    rip_senato_plurinom=allocazione_plurinom_senato(senato=senato).to_excel(excel_writer, sheet_name="RIP_CAMERA_PLURINOMINALE")
+    rip_senato_plurinom=allocazione_plurinom_senato(senato=senato).to_excel(excel_writer, sheet_name="RIP_SENATO_PLURINOMINALE")
 
     excel_writer.save()
     excel_data = strIO.getvalue()
