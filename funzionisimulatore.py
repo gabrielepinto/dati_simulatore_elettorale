@@ -1,3 +1,6 @@
+import numpy as np
+import pandas as pd
+
 def aumento_voti_territorio(data,increase=0.35,
                             partito="LEGA",
                             unit_name="COLLEGIOUNINOMINALE",
